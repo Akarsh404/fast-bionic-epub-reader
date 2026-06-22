@@ -123,41 +123,46 @@ function loadBook(bookData) {
 
   // Setup hooks to apply custom typography rules & Bionic formatting
   rendition.hooks.content.register(function (contents) {
-    const doc = contents.document;
-    
-    // Inject Custom Highlighting & Font Rules inside iframe
-    contents.addStylesheetRules({
-      "body": {
-        "font-family": "'Lora', Georgia, serif !important",
-        "line-height": "1.7 !important",
-        "padding": "0 20px"
-      },
-      "b": {
-        "font-weight": "700 !important",
-        "color": "var(--text-bold)"
-      },
-      ".epub-highlight-yellow": {
-        "background-color": "rgba(253, 224, 71, 0.45) !important",
-        "cursor": "pointer !important"
-      },
-      ".epub-highlight-green": {
-        "background-color": "rgba(134, 239, 172, 0.45) !important",
-        "cursor": "pointer !important"
-      },
-      ".epub-highlight-pink": {
-        "background-color": "rgba(244, 143, 177, 0.45) !important",
-        "cursor": "pointer !important"
-      },
-      ".epub-highlight-underline": {
-        "text-decoration": "underline !important",
-        "text-decoration-color": "var(--accent-color) !important",
-        "text-decoration-thickness": "2px !important",
-        "cursor": "pointer !important"
-      }
-    });
+    try {
+      const doc = contents.document;
+      
+      // Inject Custom Highlighting & Font Rules inside iframe
+      contents.addStylesheetRules({
+        "body": {
+          "font-family": "'Lora', Georgia, serif !important",
+          "line-height": "1.7 !important",
+          "padding": "0 20px"
+        },
+        "b": {
+          "font-weight": "700 !important",
+          "color": "var(--text-bold)"
+        },
+        ".epub-highlight-yellow": {
+          "background-color": "rgba(253, 224, 71, 0.45) !important",
+          "cursor": "pointer !important"
+        },
+        ".epub-highlight-green": {
+          "background-color": "rgba(134, 239, 172, 0.45) !important",
+          "cursor": "pointer !important"
+        },
+        ".epub-highlight-pink": {
+          "background-color": "rgba(244, 143, 177, 0.45) !important",
+          "cursor": "pointer !important"
+        },
+        ".epub-highlight-underline": {
+          "text-decoration": "underline !important",
+          "text-decoration-color": "var(--accent-color) !important",
+          "text-decoration-thickness": "2px !important",
+          "cursor": "pointer !important"
+        }
+      });
 
-    if (bionicEnabled) {
-      applyBionic(doc.body);
+      if (bionicEnabled) {
+        applyBionic(doc.body);
+      }
+    } catch (e) {
+      console.error("Hook rendering error:", e);
+      showError("Error applying book styles: " + e.message);
     }
   });
 
@@ -216,40 +221,30 @@ function loadBook(bookData) {
 }
 
 /* Recursive Bionic Parser */
+const bionicRegex = /([a-zA-Z0-9\u00C0-\u024F\u1E00-\u1EFF]+)/g;
+
+function escapeHTML(str) {
+  return str.replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+}
+
 function applyBionic(node) {
   if (node.nodeType === Node.TEXT_NODE) {
     const text = node.nodeValue;
     if (!text || text.trim() === "") return;
 
-    const fragment = node.ownerDocument.createDocumentFragment();
-    // Split text into words and non-words using regex
-    const parts = text.split(/(\w+)/);
-    let hasChanges = false;
+    const escapedText = escapeHTML(text);
+    const newHtml = escapedText.replace(bionicRegex, (match) => {
+      const len = match.length;
+      const fixation = Math.ceil(len * 0.4);
+      return `<b>${match.slice(0, fixation)}</b>${match.slice(fixation)}`;
+    });
 
-    for (let i = 0; i < parts.length; i++) {
-      const part = parts[i];
-      if (/^\w+$/.test(part)) {
-        const len = part.length;
-        const fixation = Math.ceil(len * 0.4);
-        
-        const boldPart = part.slice(0, fixation);
-        const regularPart = part.slice(fixation);
-
-        const b = node.ownerDocument.createElement("b");
-        b.textContent = boldPart;
-        fragment.appendChild(b);
-
-        if (regularPart) {
-          fragment.appendChild(node.ownerDocument.createTextNode(regularPart));
-        }
-        hasChanges = true;
-      } else {
-        fragment.appendChild(node.ownerDocument.createTextNode(part));
-      }
-    }
-
-    if (hasChanges) {
-      node.parentNode.replaceChild(fragment, node);
+    if (newHtml !== escapedText) {
+      const template = node.ownerDocument.createElement("template");
+      template.innerHTML = newHtml;
+      node.parentNode.replaceChild(template.content, node);
     }
   } else if (node.nodeType === Node.ELEMENT_NODE) {
     const tag = node.tagName.toLowerCase();
@@ -261,7 +256,8 @@ function applyBionic(node) {
       tag !== "noscript" &&
       tag !== "code" &&
       tag !== "pre" &&
-      tag !== "mark"
+      tag !== "mark" &&
+      tag !== "b"
     ) {
       const children = Array.from(node.childNodes);
       for (const child of children) {
