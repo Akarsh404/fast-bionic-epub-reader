@@ -45,21 +45,6 @@ const viewerEl = document.getElementById("viewer");
 
 const FONT_IMPORT = "@import url('https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,500;0,7..72,600;0,7..72,700;1,7..72,400&display=swap');";
 
-const THEMES = {
-  sepia: {
-    body: { background: "#fcebe8 !important", color: "#4f2d24 !important" },
-    "b": { color: "#2e150f !important" }
-  },
-  dark: {
-    body: { background: "#121212 !important", color: "#bbbbbb !important" },
-    "b": { color: "#ffffff !important" }
-  },
-  white: {
-    body: { background: "#ffffff !important", color: "#2c2c2c !important" },
-    "b": { color: "#000000 !important" }
-  }
-};
-
 /* Drag and Drop */
 dropZone.addEventListener("dragover", (e) => {
   e.preventDefault();
@@ -144,11 +129,6 @@ function loadBook(bookData) {
     flow: "paginated",
     spread: spreadEnabled ? "auto" : "none",
     minSpreadWidth: 800 // lowered from 950px to ensure it works on smaller screens
-  });
-
-  // Register themes with epub.js
-  Object.keys(THEMES).forEach(name => {
-    rendition.themes.register(name, THEMES[name]);
   });
 
   // Content hook: fires every time a chapter/section loads in the iframe
@@ -285,7 +265,11 @@ function injectThemeColors(doc, theme) {
     (doc.head || doc.documentElement).appendChild(styleEl);
   }
   styleEl.textContent = `
-    html, body { background: ${bg} !important; color: ${color} !important; }
+    html, body { 
+      background: ${bg} !important; 
+      color: ${color} !important; 
+      font-family: 'Literata', 'Charter', Georgia, serif !important;
+    }
     b { color: ${boldColor} !important; }
   `;
 }
@@ -476,7 +460,6 @@ function applyTheme(theme) {
   document.body.className = `theme-${theme}`;
 
   if (rendition) {
-    rendition.themes.select(theme);
     const allContents = rendition.getContents();
     if (allContents) {
       allContents.forEach(c => {
