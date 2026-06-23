@@ -4,8 +4,8 @@ let currentCfi = null;
 let currentSelectionCfi = null;
 let bookTitle = "default_book";
 let bionicEnabled = true;
-let spreadEnabled = false;
-let fontSize = 100;
+let spreadEnabled = true;
+let fontSize = 110;
 let activeTheme = "sepia";
 
 lucide.createIcons();
@@ -243,6 +243,7 @@ function loadBook(bookData) {
   rendition.display().then(() => {
     readerOverlay.classList.add("hidden");
     applyTheme(activeTheme);
+    updateFontSetting();
   }).catch(err => {
     readerContainer.classList.add("hidden");
     uploadContainer.classList.remove("hidden");
