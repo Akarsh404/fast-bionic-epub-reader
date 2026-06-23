@@ -1,5 +1,6 @@
 let book = null;
 let rendition = null;
+let currentCfi = null;
 let currentSelectionCfi = null;
 let bookTitle = "default_book";
 let bionicEnabled = true;
@@ -13,6 +14,8 @@ const dropZone = document.getElementById("drop-zone");
 const fileInput = document.getElementById("file-input");
 const uploadContainer = document.getElementById("upload-container");
 const readerContainer = document.getElementById("reader-container");
+const readerOverlay = document.getElementById("reader-overlay");
+const readerOverlayText = document.getElementById("reader-overlay-text");
 const errorMessage = document.getElementById("error-message");
 const errorText = document.getElementById("error-text");
 const loader = document.getElementById("loader");
@@ -110,150 +113,151 @@ function handleFile(file) {
 /* Book Initialization */
 function loadBook(bookData) {
   if (book) book.destroy();
+  currentCfi = null;
 
-  showLoader("Parsing EPUB structure...");
-
+  showLoader("Parsing EPUB...");
   book = ePub(bookData);
 
   book.ready.then(() => {
     bookTitle = book.package.metadata.title || "Untitled Book";
     bookTitleEl.textContent = bookTitle;
-    showLoader("Rendering first page...");
-  });
 
-  rendition = book.renderTo("viewer", {
-    width: "100%",
-    height: "100%",
-    flow: "paginated",
-    spread: spreadEnabled ? "auto" : "none",
-    minSpreadWidth: 950
-  });
-
-  // Register themes
-  Object.keys(THEMES).forEach(name => {
-    rendition.themes.register(name, THEMES[name]);
-  });
-
-  // Content hook: runs every time a new section loads in the iframe
-  rendition.hooks.content.register(function (contents) {
-    try {
-      const doc = contents.document;
-      const head = doc.head || doc.querySelector("head");
-
-      // Inject Literata font into the iframe
-      if (head && !doc.getElementById("bionic-font-import")) {
-        const style = doc.createElement("style");
-        style.id = "bionic-font-import";
-        style.textContent = FONT_IMPORT;
-        head.appendChild(style);
-      }
-
-      // Inject reading styles (synchronous — fast)
-      contents.addStylesheetRules({
-        "body": {
-          "font-family": "'Literata', 'Charter', Georgia, serif !important",
-          "line-height": "1.8 !important",
-          "padding": "0 20px",
-          "word-spacing": "0.05em"
-        },
-        "p, li, dd, dt, blockquote, td, th": {
-          "font-family": "'Literata', 'Charter', Georgia, serif !important",
-          "line-height": "1.8 !important"
-        },
-        "b": { "font-weight": "700 !important" },
-        ".epub-highlight-yellow": {
-          "background-color": "rgba(253, 224, 71, 0.45) !important",
-          "cursor": "pointer !important"
-        },
-        ".epub-highlight-green": {
-          "background-color": "rgba(134, 239, 172, 0.45) !important",
-          "cursor": "pointer !important"
-        },
-        ".epub-highlight-pink": {
-          "background-color": "rgba(244, 143, 177, 0.45) !important",
-          "cursor": "pointer !important"
-        },
-        ".epub-highlight-underline": {
-          "text-decoration": "underline !important",
-          "text-decoration-thickness": "2px !important",
-          "cursor": "pointer !important"
-        }
-      });
-
-      // Apply theme colors (synchronous — fast)
-      injectThemeColors(doc, activeTheme);
-
-      // DEFER bionic processing so the page renders immediately
-      // Without this, large chapters block rendition.display() from resolving
-      if (bionicEnabled) {
-        const body = doc.body;
-        setTimeout(() => {
-          applyBionic(body);
-        }, 10);
-      }
-    } catch (e) {
-      console.error("Hook rendering error:", e);
-    }
-  });
-
-  // Loading timeout — show helpful message if stuck
-  const loadTimeout = setTimeout(() => {
-    if (uploadContainer.classList.contains("hidden")) return;
-    showLoader("Still loading... large books take a moment");
-  }, 8000);
-
-  const failTimeout = setTimeout(() => {
-    if (uploadContainer.classList.contains("hidden")) return;
-    showError("This book is taking too long to load. It may be corrupted or use an unsupported format.");
-  }, 45000);
-
-  rendition.display().then(() => {
-    clearTimeout(loadTimeout);
-    clearTimeout(failTimeout);
+    // CRITICAL: Show the reader container BEFORE renderTo so epub.js
+    // has a visible container with real dimensions to render into.
+    // Without this, the container is display:none and has 0x0 size,
+    // which causes rendition.display() to hang on large files.
     uploadContainer.classList.add("hidden");
-    readerContainer.classList.remove("hidden");
     loader.classList.add("hidden");
-    applyTheme(activeTheme);
+    readerContainer.classList.remove("hidden");
+    readerOverlay.classList.remove("hidden");
+    readerOverlayText.textContent = "Rendering your book...";
+
+    // Now create the rendition inside the visible container
+    rendition = book.renderTo("viewer", {
+      width: "100%",
+      height: "100%",
+      flow: "paginated",
+      spread: spreadEnabled ? "auto" : "none",
+      minSpreadWidth: 950
+    });
+
+    // Register themes with epub.js
+    Object.keys(THEMES).forEach(name => {
+      rendition.themes.register(name, THEMES[name]);
+    });
+
+    // Content hook: fires every time a chapter/section loads in the iframe
+    rendition.hooks.content.register(function (contents) {
+      try {
+        const doc = contents.document;
+        const head = doc.head || doc.querySelector("head");
+
+        // Inject Literata font into iframe
+        if (head && !doc.getElementById("bionic-font-import")) {
+          const style = doc.createElement("style");
+          style.id = "bionic-font-import";
+          style.textContent = FONT_IMPORT;
+          head.appendChild(style);
+        }
+
+        // Inject reading styles (synchronous — fast)
+        contents.addStylesheetRules({
+          "body": {
+            "font-family": "'Literata', 'Charter', Georgia, serif !important",
+            "line-height": "1.8 !important",
+            "padding": "0 20px",
+            "word-spacing": "0.05em"
+          },
+          "p, li, dd, dt, blockquote, td, th": {
+            "font-family": "'Literata', 'Charter', Georgia, serif !important",
+            "line-height": "1.8 !important"
+          },
+          "b": { "font-weight": "700 !important" },
+          ".epub-highlight-yellow": {
+            "background-color": "rgba(253, 224, 71, 0.45) !important",
+            "cursor": "pointer !important"
+          },
+          ".epub-highlight-green": {
+            "background-color": "rgba(134, 239, 172, 0.45) !important",
+            "cursor": "pointer !important"
+          },
+          ".epub-highlight-pink": {
+            "background-color": "rgba(244, 143, 177, 0.45) !important",
+            "cursor": "pointer !important"
+          },
+          ".epub-highlight-underline": {
+            "text-decoration": "underline !important",
+            "text-decoration-thickness": "2px !important",
+            "cursor": "pointer !important"
+          }
+        });
+
+        // Apply theme colors into iframe
+        injectThemeColors(doc, activeTheme);
+
+        // DEFER bionic processing so rendition.display() resolves immediately.
+        // Without this, large chapters block rendering for seconds.
+        if (bionicEnabled) {
+          const body = doc.body;
+          setTimeout(() => applyBionic(body), 10);
+        }
+      } catch (e) {
+        console.error("Hook rendering error:", e);
+      }
+    });
+
+    // Track current position for toggles
+    rendition.on("relocated", (location) => {
+      currentCfi = location.start.cfi;
+      updateProgress(location);
+    });
+
+    rendition.on("rendered", (section) => {
+      const currentSection = book.navigation.get(section.href);
+      if (currentSection) {
+        chapterTitleEl.textContent = currentSection.label.trim();
+      } else {
+        chapterTitleEl.textContent = `Section ${section.index + 1}`;
+      }
+      restoreHighlights();
+    });
+
+    rendition.on("selected", (cfiRange, contents) => {
+      currentSelectionCfi = cfiRange;
+      const selection = contents.window.getSelection();
+      if (selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+        const iframe = document.querySelector("#viewer iframe");
+        const iframeRect = iframe ? iframe.getBoundingClientRect() : { top: 0, left: 0 };
+
+        const top = rect.top + iframeRect.top - 48;
+        const left = rect.left + iframeRect.left + (rect.width / 2) - 80;
+
+        highlightToolbar.style.top = `${Math.max(10, top)}px`;
+        highlightToolbar.style.left = `${Math.max(10, left)}px`;
+        highlightToolbar.classList.remove("hidden");
+      }
+    });
+
+    document.addEventListener("mousedown", (e) => {
+      if (!highlightToolbar.contains(e.target) && !e.target.closest("#viewer")) {
+        highlightToolbar.classList.add("hidden");
+      }
+    });
+
+    // Render the first page
+    rendition.display().then(() => {
+      readerOverlay.classList.add("hidden");
+      applyTheme(activeTheme);
+    }).catch(err => {
+      readerContainer.classList.add("hidden");
+      uploadContainer.classList.remove("hidden");
+      showError("Could not render book: " + err.message);
+    });
+
   }).catch(err => {
-    clearTimeout(loadTimeout);
-    clearTimeout(failTimeout);
-    showError("Could not render book: " + err.message);
-  });
-
-  rendition.on("rendered", (section) => {
-    const currentSection = book.navigation.get(section.href);
-    if (currentSection) {
-      chapterTitleEl.textContent = currentSection.label.trim();
-    } else {
-      chapterTitleEl.textContent = `Section ${section.index + 1}`;
-    }
-    restoreHighlights();
-  });
-
-  rendition.on("relocated", (location) => updateProgress(location));
-
-  rendition.on("selected", (cfiRange, contents) => {
-    currentSelectionCfi = cfiRange;
-    const selection = contents.window.getSelection();
-    if (selection.rangeCount > 0) {
-      const range = selection.getRangeAt(0);
-      const rect = range.getBoundingClientRect();
-      const iframe = document.querySelector("#viewer iframe");
-      const iframeRect = iframe ? iframe.getBoundingClientRect() : { top: 0, left: 0 };
-
-      const top = rect.top + iframeRect.top - 48;
-      const left = rect.left + iframeRect.left + (rect.width / 2) - 80;
-
-      highlightToolbar.style.top = `${Math.max(10, top)}px`;
-      highlightToolbar.style.left = `${Math.max(10, left)}px`;
-      highlightToolbar.classList.remove("hidden");
-    }
-  });
-
-  document.addEventListener("mousedown", (e) => {
-    if (!highlightToolbar.contains(e.target) && !e.target.closest("#viewer")) {
-      highlightToolbar.classList.add("hidden");
-    }
+    showError("Could not parse EPUB: " + err.message);
   });
 }
 
@@ -321,9 +325,7 @@ function applyBionic(node) {
       tag !== "mark" && tag !== "b" && tag !== "img"
     ) {
       const children = Array.from(node.childNodes);
-      for (const child of children) {
-        applyBionic(child);
-      }
+      for (const child of children) applyBionic(child);
     }
   }
 }
@@ -402,16 +404,16 @@ document.getElementById("btn-clear-hl").addEventListener("click", () => {
   }
 });
 
-/* Bionic Toggle */
+/* Bionic Toggle — ON by default, click to turn OFF for normal reader */
 btnToggleBionic.addEventListener("click", () => {
   bionicEnabled = !bionicEnabled;
   btnToggleBionic.classList.toggle("active", bionicEnabled);
-  if (rendition && rendition.location) {
-    rendition.display(rendition.location.start.cfi);
+  if (rendition && currentCfi) {
+    rendition.display(currentCfi);
   }
 });
 
-/* Spread Toggle (Two-page view) */
+/* Spread Toggle — Two-page side-by-side view */
 btnToggleSpread.addEventListener("click", () => {
   spreadEnabled = !spreadEnabled;
   btnToggleSpread.classList.toggle("active", spreadEnabled);
@@ -419,9 +421,12 @@ btnToggleSpread.addEventListener("click", () => {
 
   if (rendition) {
     rendition.spread(spreadEnabled ? "auto" : "none");
+    // Wait for CSS max-width transition to finish, then re-render
     setTimeout(() => {
-      rendition.resize();
-    }, 100);
+      if (currentCfi) {
+        rendition.display(currentCfi);
+      }
+    }, 350);
   }
 });
 
@@ -467,7 +472,6 @@ function applyTheme(theme) {
 
   if (rendition) {
     rendition.themes.select(theme);
-
     const allContents = rendition.getContents();
     if (allContents) {
       allContents.forEach(c => {
@@ -487,12 +491,16 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "ArrowRight") rendition.next();
 });
 
+/* Close book and return to upload */
 btnClose.addEventListener("click", () => {
   if (book) { book.destroy(); book = null; rendition = null; }
+  currentCfi = null;
   uploadContainer.classList.remove("hidden");
   readerContainer.classList.add("hidden");
   highlightToolbar.classList.add("hidden");
   viewerEl.classList.remove("spread-mode");
   spreadEnabled = false;
   btnToggleSpread.classList.remove("active");
+  bionicEnabled = true;
+  btnToggleBionic.classList.add("active");
 });

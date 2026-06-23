@@ -46,6 +46,12 @@
 
   <!-- Reader Application View (Hidden by default) -->
   <div id="reader-container" class="reader-container hidden">
+    <!-- Loading overlay (shown while epub.js renders into the now-visible container) -->
+    <div id="reader-overlay" class="reader-overlay">
+      <div class="spinner"></div>
+      <p id="reader-overlay-text">Rendering your book...</p>
+    </div>
+
     <!-- Top Navigation Header -->
     <header class="reader-header">
       <div class="header-left">
