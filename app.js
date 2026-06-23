@@ -3,13 +3,11 @@ let rendition = null;
 let currentSelectionCfi = null;
 let bookTitle = "default_book";
 let bionicEnabled = true;
-let fontSize = 100; // in percent
+let fontSize = 100;
 let activeTheme = "sepia";
 
-// Initialize Lucide Icons
 lucide.createIcons();
 
-// Elements
 const dropZone = document.getElementById("drop-zone");
 const fileInput = document.getElementById("file-input");
 const uploadContainer = document.getElementById("upload-container");
@@ -38,7 +36,24 @@ const pageIndicator = document.getElementById("page-indicator");
 
 const highlightToolbar = document.getElementById("highlight-toolbar");
 
-/* Drag and Drop Handlers */
+const FONT_IMPORT = "@import url('https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,500;0,7..72,600;0,7..72,700;1,7..72,400&display=swap');";
+
+const THEMES = {
+  sepia: {
+    body: { background: "#fcebe8 !important", color: "#4f2d24 !important" },
+    "b": { color: "#2e150f !important" }
+  },
+  dark: {
+    body: { background: "#121212 !important", color: "#bbbbbb !important" },
+    "b": { color: "#ffffff !important" }
+  },
+  white: {
+    body: { background: "#ffffff !important", color: "#2c2c2c !important" },
+    "b": { color: "#000000 !important" }
+  }
+};
+
+/* Drag and Drop */
 dropZone.addEventListener("dragover", (e) => {
   e.preventDefault();
   dropZone.classList.add("dragover");
@@ -52,19 +67,13 @@ dropZone.addEventListener("drop", (e) => {
   e.preventDefault();
   dropZone.classList.remove("dragover");
   const files = e.dataTransfer.files;
-  if (files.length > 0) {
-    handleFile(files[0]);
-  }
+  if (files.length > 0) handleFile(files[0]);
 });
 
-dropZone.addEventListener("click", () => {
-  fileInput.click();
-});
+dropZone.addEventListener("click", () => fileInput.click());
 
 fileInput.addEventListener("change", (e) => {
-  if (e.target.files.length > 0) {
-    handleFile(e.target.files[0]);
-  }
+  if (e.target.files.length > 0) handleFile(e.target.files[0]);
 });
 
 function showError(msg) {
@@ -83,37 +92,27 @@ function handleFile(file) {
     showError("Invalid file format. Please upload an .epub file.");
     return;
   }
-
   showLoader();
-
   const reader = new FileReader();
-  reader.onload = function (e) {
-    try {
-      loadBook(e.target.result);
-    } catch (err) {
-      showError("Error loading book: " + err.message);
-    }
+  reader.onload = (e) => {
+    try { loadBook(e.target.result); }
+    catch (err) { showError("Error loading book: " + err.message); }
   };
-  reader.onerror = function () {
-    showError("Failed to read the file.");
-  };
+  reader.onerror = () => showError("Failed to read the file.");
   reader.readAsArrayBuffer(file);
 }
 
-/* EPUB Reader Initialization & Layout */
+/* Book Initialization */
 function loadBook(bookData) {
-  if (book) {
-    book.destroy();
-  }
+  if (book) book.destroy();
 
   book = ePub(bookData);
-  
+
   book.ready.then(() => {
     bookTitle = book.package.metadata.title || "Untitled Book";
     bookTitleEl.textContent = bookTitle;
   });
 
-  // Render options
   rendition = book.renderTo("viewer", {
     width: "100%",
     height: "100%",
@@ -121,21 +120,39 @@ function loadBook(bookData) {
     spread: "none"
   });
 
-  // Setup hooks to apply custom typography rules & Bionic formatting
+  // Register all three themes with epub.js
+  Object.keys(THEMES).forEach(name => {
+    rendition.themes.register(name, THEMES[name]);
+  });
+
+  // Content hook: runs every time a new section/page is rendered in the iframe
   rendition.hooks.content.register(function (contents) {
     try {
       const doc = contents.document;
-      
-      // Inject Custom Highlighting & Font Rules inside iframe
+      const head = doc.head || doc.querySelector("head");
+
+      // Inject Literata font into the iframe
+      if (head && !doc.getElementById("bionic-font-import")) {
+        const style = doc.createElement("style");
+        style.id = "bionic-font-import";
+        style.textContent = FONT_IMPORT;
+        head.appendChild(style);
+      }
+
+      // Inject reading styles and highlight classes
       contents.addStylesheetRules({
         "body": {
-          "font-family": "'Lora', Georgia, serif !important",
-          "line-height": "1.7 !important",
-          "padding": "0 20px"
+          "font-family": "'Literata', 'Charter', Georgia, serif !important",
+          "line-height": "1.8 !important",
+          "padding": "0 20px",
+          "word-spacing": "0.05em"
+        },
+        "p, li, dd, dt, blockquote, td, th": {
+          "font-family": "'Literata', 'Charter', Georgia, serif !important",
+          "line-height": "1.8 !important"
         },
         "b": {
-          "font-weight": "700 !important",
-          "color": "var(--text-bold)"
+          "font-weight": "700 !important"
         },
         ".epub-highlight-yellow": {
           "background-color": "rgba(253, 224, 71, 0.45) !important",
@@ -151,22 +168,22 @@ function loadBook(bookData) {
         },
         ".epub-highlight-underline": {
           "text-decoration": "underline !important",
-          "text-decoration-color": "var(--accent-color) !important",
           "text-decoration-thickness": "2px !important",
           "cursor": "pointer !important"
         }
       });
+
+      // Apply the active theme directly to the iframe document
+      injectThemeColors(doc, activeTheme);
 
       if (bionicEnabled) {
         applyBionic(doc.body);
       }
     } catch (e) {
       console.error("Hook rendering error:", e);
-      showError("Error applying book styles: " + e.message);
     }
   });
 
-  // Display the book
   rendition.display().then(() => {
     uploadContainer.classList.add("hidden");
     readerContainer.classList.remove("hidden");
@@ -176,7 +193,6 @@ function loadBook(bookData) {
     showError("Could not render book: " + err.message);
   });
 
-  // Register section changes (update chapter titles and progress)
   rendition.on("rendered", (section) => {
     const currentSection = book.navigation.get(section.href);
     if (currentSection) {
@@ -184,35 +200,29 @@ function loadBook(bookData) {
     } else {
       chapterTitleEl.textContent = `Section ${section.index + 1}`;
     }
-    
     restoreHighlights();
   });
 
-  rendition.on("relocated", (location) => {
-    updateProgress(location);
-  });
+  rendition.on("relocated", (location) => updateProgress(location));
 
-  // Selection events
   rendition.on("selected", (cfiRange, contents) => {
     currentSelectionCfi = cfiRange;
-    
-    // Position toolbar
     const selection = contents.window.getSelection();
     if (selection.rangeCount > 0) {
       const range = selection.getRangeAt(0);
       const rect = range.getBoundingClientRect();
-      const iframeRect = contents.container.getBoundingClientRect();
-      
+      const iframe = document.querySelector("#viewer iframe");
+      const iframeRect = iframe ? iframe.getBoundingClientRect() : { top: 0, left: 0 };
+
       const top = rect.top + iframeRect.top - 48;
       const left = rect.left + iframeRect.left + (rect.width / 2) - 80;
-      
+
       highlightToolbar.style.top = `${Math.max(10, top)}px`;
       highlightToolbar.style.left = `${Math.max(10, left)}px`;
       highlightToolbar.classList.remove("hidden");
     }
   });
 
-  // Clear selection toolbar on click elsewhere
   document.addEventListener("mousedown", (e) => {
     if (!highlightToolbar.contains(e.target) && !e.target.closest("#viewer")) {
       highlightToolbar.classList.add("hidden");
@@ -220,13 +230,44 @@ function loadBook(bookData) {
   });
 }
 
-/* Recursive Bionic Parser */
-const bionicRegex = /([a-zA-Z0-9\u00C0-\u024F\u1E00-\u1EFF]+)/g;
+/* Inject theme colors directly into iframe document */
+function injectThemeColors(doc, theme) {
+  let bg, color, boldColor;
+  if (theme === "sepia") {
+    bg = "#fcebe8"; color = "#4f2d24"; boldColor = "#2e150f";
+  } else if (theme === "dark") {
+    bg = "#121212"; color = "#bbbbbb"; boldColor = "#ffffff";
+  } else {
+    bg = "#ffffff"; color = "#2c2c2c"; boldColor = "#000000";
+  }
+
+  const styleId = "bionic-theme-override";
+  let styleEl = doc.getElementById(styleId);
+  if (!styleEl) {
+    styleEl = doc.createElement("style");
+    styleEl.id = styleId;
+    (doc.head || doc.documentElement).appendChild(styleEl);
+  }
+  styleEl.textContent = `
+    html, body { background: ${bg} !important; color: ${color} !important; }
+    b { color: ${boldColor} !important; }
+  `;
+}
+
+/* Bionic Reading Algorithm — word-length-based fixation */
+const bionicRegex = /([a-zA-Z\u00C0-\u024F\u1E00-\u1EFF']+)/g;
+
+function getFixation(len) {
+  if (len <= 1) return 1;
+  if (len <= 2) return 2;
+  if (len <= 3) return 2;
+  if (len <= 5) return Math.ceil(len * 0.5);
+  if (len <= 9) return Math.ceil(len * 0.4);
+  return Math.ceil(len * 0.35);
+}
 
 function escapeHTML(str) {
-  return str.replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;");
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function applyBionic(node) {
@@ -234,30 +275,23 @@ function applyBionic(node) {
     const text = node.nodeValue;
     if (!text || text.trim() === "") return;
 
-    const escapedText = escapeHTML(text);
-    const newHtml = escapedText.replace(bionicRegex, (match) => {
-      const len = match.length;
-      const fixation = Math.ceil(len * 0.4);
+    const escaped = escapeHTML(text);
+    const newHtml = escaped.replace(bionicRegex, (match) => {
+      const fixation = getFixation(match.length);
       return `<b>${match.slice(0, fixation)}</b>${match.slice(fixation)}`;
     });
 
-    if (newHtml !== escapedText) {
+    if (newHtml !== escaped) {
       const template = node.ownerDocument.createElement("template");
       template.innerHTML = newHtml;
       node.parentNode.replaceChild(template.content, node);
     }
   } else if (node.nodeType === Node.ELEMENT_NODE) {
     const tag = node.tagName.toLowerCase();
-    // Ignore interactive/formatting elements that shouldn't receive bionic format
     if (
-      tag !== "script" &&
-      tag !== "style" &&
-      tag !== "svg" &&
-      tag !== "noscript" &&
-      tag !== "code" &&
-      tag !== "pre" &&
-      tag !== "mark" &&
-      tag !== "b"
+      tag !== "script" && tag !== "style" && tag !== "svg" &&
+      tag !== "noscript" && tag !== "code" && tag !== "pre" &&
+      tag !== "mark" && tag !== "b" && tag !== "img"
     ) {
       const children = Array.from(node.childNodes);
       for (const child of children) {
@@ -267,39 +301,34 @@ function applyBionic(node) {
   }
 }
 
-/* Progress indicator updates */
+/* Progress */
 function updateProgress(location) {
   if (!book || !rendition) return;
-
   const startCfi = location.start.cfi;
-  const endCfi = location.end.cfi;
-  
-  // Progress estimation
-  const percentage = book.locations.percentageFromCfi ? Math.round(book.locations.percentageFromCfi(startCfi) * 100) : 0;
-  
+  const percentage = book.locations.percentageFromCfi
+    ? Math.round(book.locations.percentageFromCfi(startCfi) * 100) : 0;
+
   progressBar.style.width = `${percentage}%`;
-  
+
   if (location.start.displayed && location.start.displayed.page) {
-    const currentPage = location.start.displayed.page;
-    const totalPages = location.start.displayed.total;
-    pageIndicator.textContent = `Page ${currentPage} of ${totalPages} (${percentage}%)`;
+    const cp = location.start.displayed.page;
+    const tp = location.start.displayed.total;
+    pageIndicator.textContent = `Page ${cp} of ${tp} · ${percentage}%`;
   } else {
     pageIndicator.textContent = `${percentage}% Read`;
   }
 }
 
-/* Annotation and Highlight Caching */
+/* Highlights */
 function getStorageKey() {
   return `highlights_${bookTitle.replace(/\s+/g, "_")}`;
 }
 
 function restoreHighlights() {
   if (!rendition) return;
-  const key = getStorageKey();
-  const saved = localStorage.getItem(key);
+  const saved = localStorage.getItem(getStorageKey());
   if (saved) {
-    const highlights = JSON.parse(saved);
-    highlights.forEach(hl => {
+    JSON.parse(saved).forEach(hl => {
       rendition.annotations.add("highlight", hl.cfi, {}, () => {
         removeHighlight(hl.cfi);
       }, `epub-highlight-${hl.color}`);
@@ -309,11 +338,8 @@ function restoreHighlights() {
 
 function addHighlight(color) {
   if (!rendition || !currentSelectionCfi) return;
-  
   const key = getStorageKey();
   let highlights = JSON.parse(localStorage.getItem(key) || "[]");
-  
-  // Prevent duplicate CFI ranges
   highlights = highlights.filter(hl => hl.cfi !== currentSelectionCfi);
   highlights.push({ cfi: currentSelectionCfi, color: color });
   localStorage.setItem(key, JSON.stringify(highlights));
@@ -322,7 +348,6 @@ function addHighlight(color) {
     removeHighlight(currentSelectionCfi);
   }, `epub-highlight-${color}`);
 
-  // Clear current browser selection
   const iframeContents = rendition.getContents();
   if (iframeContents && iframeContents[0]) {
     iframeContents[0].window.getSelection().removeAllRanges();
@@ -332,21 +357,15 @@ function addHighlight(color) {
 
 function removeHighlight(cfi) {
   if (!rendition) return;
-  
   rendition.annotations.remove(cfi, "highlight");
-  
   const key = getStorageKey();
   let highlights = JSON.parse(localStorage.getItem(key) || "[]");
   highlights = highlights.filter(hl => hl.cfi !== cfi);
   localStorage.setItem(key, JSON.stringify(highlights));
 }
 
-// Highlight button clicks
 document.querySelectorAll(".hl-btn").forEach(btn => {
-  btn.addEventListener("click", () => {
-    const color = btn.getAttribute("data-color");
-    addHighlight(color);
-  });
+  btn.addEventListener("click", () => addHighlight(btn.getAttribute("data-color")));
 });
 
 document.getElementById("btn-clear-hl").addEventListener("click", () => {
@@ -356,44 +375,32 @@ document.getElementById("btn-clear-hl").addEventListener("click", () => {
   }
 });
 
-/* Settings Adjustments */
+/* Bionic Toggle */
 btnToggleBionic.addEventListener("click", () => {
   bionicEnabled = !bionicEnabled;
-  if (bionicEnabled) {
-    btnToggleBionic.classList.add("active");
-  } else {
-    btnToggleBionic.classList.remove("active");
-  }
-  
-  // Reload rendition to apply/remove bionic styles
+  btnToggleBionic.classList.toggle("active", bionicEnabled);
   if (rendition && rendition.location) {
     rendition.display(rendition.location.start.cfi);
   }
 });
 
+/* Font Size */
 btnFontDecrease.addEventListener("click", () => {
-  if (fontSize > 60) {
-    fontSize -= 10;
-    updateFontSetting();
-  }
+  if (fontSize > 60) { fontSize -= 10; updateFontSetting(); }
 });
 
 btnFontIncrease.addEventListener("click", () => {
-  if (fontSize < 200) {
-    fontSize += 10;
-    updateFontSetting();
-  }
+  if (fontSize < 200) { fontSize += 10; updateFontSetting(); }
 });
 
 function updateFontSetting() {
   fontSizeIndicator.textContent = `${fontSize}%`;
-  if (rendition) {
-    rendition.themes.fontSize(`${fontSize}%`);
-  }
+  if (rendition) rendition.themes.fontSize(`${fontSize}%`);
 }
 
 /* Theme Selector */
-btnThemeDropdown.addEventListener("click", () => {
+btnThemeDropdown.addEventListener("click", (e) => {
+  e.stopPropagation();
   themeMenu.classList.toggle("hidden");
 });
 
@@ -404,12 +411,11 @@ document.addEventListener("click", (e) => {
 });
 
 themeOptions.forEach(opt => {
-  opt.addEventListener("click", () => {
+  opt.addEventListener("click", (e) => {
+    e.stopPropagation();
     themeOptions.forEach(o => o.classList.remove("active"));
     opt.classList.add("active");
-    
-    const theme = opt.getAttribute("data-theme");
-    applyTheme(theme);
+    applyTheme(opt.getAttribute("data-theme"));
     themeMenu.classList.add("hidden");
   });
 });
@@ -419,61 +425,33 @@ function applyTheme(theme) {
   document.body.className = `theme-${theme}`;
 
   if (rendition) {
-    // Resolve theme variables to inject inside iframe
-    let bg, color, boldColor;
-    if (theme === "sepia") {
-      bg = "#fcebe8";
-      color = "#4f2d24";
-      boldColor = "#2e150f";
-    } else if (theme === "dark") {
-      bg = "#121212";
-      color = "#bbbbbb";
-      boldColor = "#ffffff";
-    } else {
-      bg = "#ffffff";
-      color = "#2c2c2c";
-      boldColor = "#000000";
-    }
+    // Use epub.js theme system
+    rendition.themes.select(theme);
 
-    // Set inside iframe body via rendition overrides
-    rendition.themes.override("background", bg);
-    rendition.themes.override("color", color);
-    
-    // Re-register stylesheets variables so they render correctly
-    const contents = rendition.getContents();
-    if (contents && contents[0]) {
-      contents[0].document.documentElement.style.setProperty("--text-bold", boldColor);
-      contents[0].document.documentElement.style.setProperty("--accent-color", theme === "dark" ? "#e0b0ff" : "#a84632");
+    // Also directly inject into all loaded iframe contents
+    const allContents = rendition.getContents();
+    if (allContents) {
+      allContents.forEach(c => {
+        if (c && c.document) {
+          injectThemeColors(c.document, theme);
+        }
+      });
     }
   }
 }
 
-/* General Navigation */
-btnPrev.addEventListener("click", () => {
-  if (rendition) rendition.prev();
-});
+/* Navigation */
+btnPrev.addEventListener("click", () => { if (rendition) rendition.prev(); });
+btnNext.addEventListener("click", () => { if (rendition) rendition.next(); });
 
-btnNext.addEventListener("click", () => {
-  if (rendition) rendition.next();
-});
-
-// Arrow key navigation listener
 document.addEventListener("keydown", (e) => {
   if (!rendition) return;
-  if (e.key === "ArrowLeft") {
-    rendition.prev();
-  } else if (e.key === "ArrowRight") {
-    rendition.next();
-  }
+  if (e.key === "ArrowLeft") rendition.prev();
+  else if (e.key === "ArrowRight") rendition.next();
 });
 
-// Go back to drop zone
 btnClose.addEventListener("click", () => {
-  if (book) {
-    book.destroy();
-    book = null;
-    rendition = null;
-  }
+  if (book) { book.destroy(); book = null; rendition = null; }
   uploadContainer.classList.remove("hidden");
   readerContainer.classList.add("hidden");
   highlightToolbar.classList.add("hidden");
