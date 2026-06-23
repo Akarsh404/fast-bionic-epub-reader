@@ -3,6 +3,7 @@ let rendition = null;
 let currentSelectionCfi = null;
 let bookTitle = "default_book";
 let bionicEnabled = true;
+let spreadEnabled = false;
 let fontSize = 100;
 let activeTheme = "sepia";
 
@@ -15,12 +16,14 @@ const readerContainer = document.getElementById("reader-container");
 const errorMessage = document.getElementById("error-message");
 const errorText = document.getElementById("error-text");
 const loader = document.getElementById("loader");
+const loaderText = loader.querySelector("p");
 
 const btnClose = document.getElementById("btn-close");
 const bookTitleEl = document.getElementById("book-title");
 const chapterTitleEl = document.getElementById("chapter-title");
 
 const btnToggleBionic = document.getElementById("btn-toggle-bionic");
+const btnToggleSpread = document.getElementById("btn-toggle-spread");
 const btnFontDecrease = document.getElementById("btn-font-decrease");
 const btnFontIncrease = document.getElementById("btn-font-increase");
 const fontSizeIndicator = document.getElementById("font-size-indicator");
@@ -35,6 +38,7 @@ const progressBar = document.getElementById("progress-bar");
 const pageIndicator = document.getElementById("page-indicator");
 
 const highlightToolbar = document.getElementById("highlight-toolbar");
+const viewerEl = document.getElementById("viewer");
 
 const FONT_IMPORT = "@import url('https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,500;0,7..72,600;0,7..72,700;1,7..72,400&display=swap');";
 
@@ -82,9 +86,10 @@ function showError(msg) {
   loader.classList.add("hidden");
 }
 
-function showLoader() {
+function showLoader(msg) {
   errorMessage.classList.add("hidden");
   loader.classList.remove("hidden");
+  if (msg) loaderText.textContent = msg;
 }
 
 function handleFile(file) {
@@ -92,7 +97,7 @@ function handleFile(file) {
     showError("Invalid file format. Please upload an .epub file.");
     return;
   }
-  showLoader();
+  showLoader("Reading file...");
   const reader = new FileReader();
   reader.onload = (e) => {
     try { loadBook(e.target.result); }
@@ -106,26 +111,30 @@ function handleFile(file) {
 function loadBook(bookData) {
   if (book) book.destroy();
 
+  showLoader("Parsing EPUB structure...");
+
   book = ePub(bookData);
 
   book.ready.then(() => {
     bookTitle = book.package.metadata.title || "Untitled Book";
     bookTitleEl.textContent = bookTitle;
+    showLoader("Rendering first page...");
   });
 
   rendition = book.renderTo("viewer", {
     width: "100%",
     height: "100%",
     flow: "paginated",
-    spread: "none"
+    spread: spreadEnabled ? "auto" : "none",
+    minSpreadWidth: 950
   });
 
-  // Register all three themes with epub.js
+  // Register themes
   Object.keys(THEMES).forEach(name => {
     rendition.themes.register(name, THEMES[name]);
   });
 
-  // Content hook: runs every time a new section/page is rendered in the iframe
+  // Content hook: runs every time a new section loads in the iframe
   rendition.hooks.content.register(function (contents) {
     try {
       const doc = contents.document;
@@ -139,7 +148,7 @@ function loadBook(bookData) {
         head.appendChild(style);
       }
 
-      // Inject reading styles and highlight classes
+      // Inject reading styles (synchronous — fast)
       contents.addStylesheetRules({
         "body": {
           "font-family": "'Literata', 'Charter', Georgia, serif !important",
@@ -151,9 +160,7 @@ function loadBook(bookData) {
           "font-family": "'Literata', 'Charter', Georgia, serif !important",
           "line-height": "1.8 !important"
         },
-        "b": {
-          "font-weight": "700 !important"
-        },
+        "b": { "font-weight": "700 !important" },
         ".epub-highlight-yellow": {
           "background-color": "rgba(253, 224, 71, 0.45) !important",
           "cursor": "pointer !important"
@@ -173,23 +180,43 @@ function loadBook(bookData) {
         }
       });
 
-      // Apply the active theme directly to the iframe document
+      // Apply theme colors (synchronous — fast)
       injectThemeColors(doc, activeTheme);
 
+      // DEFER bionic processing so the page renders immediately
+      // Without this, large chapters block rendition.display() from resolving
       if (bionicEnabled) {
-        applyBionic(doc.body);
+        const body = doc.body;
+        setTimeout(() => {
+          applyBionic(body);
+        }, 10);
       }
     } catch (e) {
       console.error("Hook rendering error:", e);
     }
   });
 
+  // Loading timeout — show helpful message if stuck
+  const loadTimeout = setTimeout(() => {
+    if (uploadContainer.classList.contains("hidden")) return;
+    showLoader("Still loading... large books take a moment");
+  }, 8000);
+
+  const failTimeout = setTimeout(() => {
+    if (uploadContainer.classList.contains("hidden")) return;
+    showError("This book is taking too long to load. It may be corrupted or use an unsupported format.");
+  }, 45000);
+
   rendition.display().then(() => {
+    clearTimeout(loadTimeout);
+    clearTimeout(failTimeout);
     uploadContainer.classList.add("hidden");
     readerContainer.classList.remove("hidden");
     loader.classList.add("hidden");
     applyTheme(activeTheme);
   }).catch(err => {
+    clearTimeout(loadTimeout);
+    clearTimeout(failTimeout);
     showError("Could not render book: " + err.message);
   });
 
@@ -254,7 +281,7 @@ function injectThemeColors(doc, theme) {
   `;
 }
 
-/* Bionic Reading Algorithm — word-length-based fixation */
+/* Bionic Reading — word-length-based fixation */
 const bionicRegex = /([a-zA-Z\u00C0-\u024F\u1E00-\u1EFF']+)/g;
 
 function getFixation(len) {
@@ -384,6 +411,20 @@ btnToggleBionic.addEventListener("click", () => {
   }
 });
 
+/* Spread Toggle (Two-page view) */
+btnToggleSpread.addEventListener("click", () => {
+  spreadEnabled = !spreadEnabled;
+  btnToggleSpread.classList.toggle("active", spreadEnabled);
+  viewerEl.classList.toggle("spread-mode", spreadEnabled);
+
+  if (rendition) {
+    rendition.spread(spreadEnabled ? "auto" : "none");
+    setTimeout(() => {
+      rendition.resize();
+    }, 100);
+  }
+});
+
 /* Font Size */
 btnFontDecrease.addEventListener("click", () => {
   if (fontSize > 60) { fontSize -= 10; updateFontSetting(); }
@@ -425,16 +466,12 @@ function applyTheme(theme) {
   document.body.className = `theme-${theme}`;
 
   if (rendition) {
-    // Use epub.js theme system
     rendition.themes.select(theme);
 
-    // Also directly inject into all loaded iframe contents
     const allContents = rendition.getContents();
     if (allContents) {
       allContents.forEach(c => {
-        if (c && c.document) {
-          injectThemeColors(c.document, theme);
-        }
+        if (c && c.document) injectThemeColors(c.document, theme);
       });
     }
   }
@@ -455,4 +492,7 @@ btnClose.addEventListener("click", () => {
   uploadContainer.classList.remove("hidden");
   readerContainer.classList.add("hidden");
   highlightToolbar.classList.add("hidden");
+  viewerEl.classList.remove("spread-mode");
+  spreadEnabled = false;
+  btnToggleSpread.classList.remove("active");
 });

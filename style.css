@@ -396,10 +396,16 @@ h2 {
 .viewer {
   flex: 1;
   width: 100%;
-  max-width: 800px;
+  max-width: 700px;
   margin: 0 auto;
   padding: 2rem;
   overflow-y: hidden;
+  transition: max-width 0.3s ease;
+}
+
+.viewer.spread-mode {
+  max-width: 1300px;
+  padding: 2rem 3rem;
 }
 
 /* Floating Navigation Arrows */
