@@ -133,6 +133,10 @@ function loadBook(bookData) {
   readerOverlay.classList.remove("hidden");
   readerOverlayText.textContent = "Rendering your book...";
 
+  // Force a synchronous browser layout pass so epub.js can read the correct container width.
+  // Without this, the width might be 0 for a fraction of a millisecond when renderTo is called.
+  void readerContainer.offsetWidth;
+
   // Create rendition immediately (epub.js expects this before book.ready)
   rendition = book.renderTo("viewer", {
     width: "100%",
@@ -250,7 +254,10 @@ function loadBook(bookData) {
     // Explicitly force spread if enabled to catch edge cases where width was 0 at renderTo time
     if (spreadEnabled) {
       rendition.spread("auto");
-      rendition.resize();
+      // Must re-display to actually paint the two columns if it was initially single-column
+      setTimeout(() => {
+        if (currentCfi) rendition.display(currentCfi);
+      }, 50);
     }
   }).catch(err => {
     readerContainer.classList.add("hidden");
