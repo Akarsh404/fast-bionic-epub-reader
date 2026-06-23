@@ -115,149 +115,138 @@ function loadBook(bookData) {
   if (book) book.destroy();
   currentCfi = null;
 
-  showLoader("Parsing EPUB...");
   book = ePub(bookData);
 
   book.ready.then(() => {
     bookTitle = book.package.metadata.title || "Untitled Book";
     bookTitleEl.textContent = bookTitle;
+  });
 
-    // CRITICAL: Show the reader container BEFORE renderTo so epub.js
-    // has a visible container with real dimensions to render into.
-    // Without this, the container is display:none and has 0x0 size,
-    // which causes rendition.display() to hang on large files.
-    uploadContainer.classList.add("hidden");
-    loader.classList.add("hidden");
-    readerContainer.classList.remove("hidden");
-    readerOverlay.classList.remove("hidden");
-    readerOverlayText.textContent = "Rendering your book...";
+  // Show reader container with overlay BEFORE renderTo so epub.js
+  // has a visible container with real dimensions to render into.
+  uploadContainer.classList.add("hidden");
+  loader.classList.add("hidden");
+  readerContainer.classList.remove("hidden");
+  readerOverlay.classList.remove("hidden");
+  readerOverlayText.textContent = "Rendering your book...";
 
-    // Now create the rendition inside the visible container
-    rendition = book.renderTo("viewer", {
-      width: "100%",
-      height: "100%",
-      flow: "paginated",
-      spread: spreadEnabled ? "auto" : "none",
-      minSpreadWidth: 950
-    });
+  // Create rendition immediately (epub.js expects this before book.ready)
+  rendition = book.renderTo("viewer", {
+    width: "100%",
+    height: "100%",
+    flow: "paginated",
+    spread: spreadEnabled ? "auto" : "none",
+    minSpreadWidth: 950
+  });
 
-    // Register themes with epub.js
-    Object.keys(THEMES).forEach(name => {
-      rendition.themes.register(name, THEMES[name]);
-    });
+  // Register themes with epub.js
+  Object.keys(THEMES).forEach(name => {
+    rendition.themes.register(name, THEMES[name]);
+  });
 
-    // Content hook: fires every time a chapter/section loads in the iframe
-    rendition.hooks.content.register(function (contents) {
-      try {
-        const doc = contents.document;
-        const head = doc.head || doc.querySelector("head");
+  // Content hook: fires every time a chapter/section loads in the iframe
+  rendition.hooks.content.register(function (contents) {
+    try {
+      const doc = contents.document;
+      const head = doc.head || doc.querySelector("head");
 
-        // Inject Literata font into iframe
-        if (head && !doc.getElementById("bionic-font-import")) {
-          const style = doc.createElement("style");
-          style.id = "bionic-font-import";
-          style.textContent = FONT_IMPORT;
-          head.appendChild(style);
+      if (head && !doc.getElementById("bionic-font-import")) {
+        const style = doc.createElement("style");
+        style.id = "bionic-font-import";
+        style.textContent = FONT_IMPORT;
+        head.appendChild(style);
+      }
+
+      contents.addStylesheetRules({
+        "body": {
+          "font-family": "'Literata', 'Charter', Georgia, serif !important",
+          "line-height": "1.8 !important",
+          "padding": "0 20px",
+          "word-spacing": "0.05em"
+        },
+        "p, li, dd, dt, blockquote, td, th": {
+          "font-family": "'Literata', 'Charter', Georgia, serif !important",
+          "line-height": "1.8 !important"
+        },
+        "b": { "font-weight": "700 !important" },
+        ".epub-highlight-yellow": {
+          "background-color": "rgba(253, 224, 71, 0.45) !important",
+          "cursor": "pointer !important"
+        },
+        ".epub-highlight-green": {
+          "background-color": "rgba(134, 239, 172, 0.45) !important",
+          "cursor": "pointer !important"
+        },
+        ".epub-highlight-pink": {
+          "background-color": "rgba(244, 143, 177, 0.45) !important",
+          "cursor": "pointer !important"
+        },
+        ".epub-highlight-underline": {
+          "text-decoration": "underline !important",
+          "text-decoration-thickness": "2px !important",
+          "cursor": "pointer !important"
         }
+      });
 
-        // Inject reading styles (synchronous — fast)
-        contents.addStylesheetRules({
-          "body": {
-            "font-family": "'Literata', 'Charter', Georgia, serif !important",
-            "line-height": "1.8 !important",
-            "padding": "0 20px",
-            "word-spacing": "0.05em"
-          },
-          "p, li, dd, dt, blockquote, td, th": {
-            "font-family": "'Literata', 'Charter', Georgia, serif !important",
-            "line-height": "1.8 !important"
-          },
-          "b": { "font-weight": "700 !important" },
-          ".epub-highlight-yellow": {
-            "background-color": "rgba(253, 224, 71, 0.45) !important",
-            "cursor": "pointer !important"
-          },
-          ".epub-highlight-green": {
-            "background-color": "rgba(134, 239, 172, 0.45) !important",
-            "cursor": "pointer !important"
-          },
-          ".epub-highlight-pink": {
-            "background-color": "rgba(244, 143, 177, 0.45) !important",
-            "cursor": "pointer !important"
-          },
-          ".epub-highlight-underline": {
-            "text-decoration": "underline !important",
-            "text-decoration-thickness": "2px !important",
-            "cursor": "pointer !important"
-          }
-        });
+      injectThemeColors(doc, activeTheme);
 
-        // Apply theme colors into iframe
-        injectThemeColors(doc, activeTheme);
-
-        // DEFER bionic processing so rendition.display() resolves immediately.
-        // Without this, large chapters block rendering for seconds.
-        if (bionicEnabled) {
-          const body = doc.body;
-          setTimeout(() => applyBionic(body), 10);
-        }
-      } catch (e) {
-        console.error("Hook rendering error:", e);
+      if (bionicEnabled) {
+        const body = doc.body;
+        setTimeout(() => applyBionic(body), 10);
       }
-    });
+    } catch (e) {
+      console.error("Hook rendering error:", e);
+    }
+  });
 
-    // Track current position for toggles
-    rendition.on("relocated", (location) => {
-      currentCfi = location.start.cfi;
-      updateProgress(location);
-    });
+  // Track current position for toggles
+  rendition.on("relocated", (location) => {
+    currentCfi = location.start.cfi;
+    updateProgress(location);
+  });
 
-    rendition.on("rendered", (section) => {
-      const currentSection = book.navigation.get(section.href);
-      if (currentSection) {
-        chapterTitleEl.textContent = currentSection.label.trim();
-      } else {
-        chapterTitleEl.textContent = `Section ${section.index + 1}`;
-      }
-      restoreHighlights();
-    });
+  rendition.on("rendered", (section) => {
+    const currentSection = book.navigation.get(section.href);
+    if (currentSection) {
+      chapterTitleEl.textContent = currentSection.label.trim();
+    } else {
+      chapterTitleEl.textContent = `Section ${section.index + 1}`;
+    }
+    restoreHighlights();
+  });
 
-    rendition.on("selected", (cfiRange, contents) => {
-      currentSelectionCfi = cfiRange;
-      const selection = contents.window.getSelection();
-      if (selection.rangeCount > 0) {
-        const range = selection.getRangeAt(0);
-        const rect = range.getBoundingClientRect();
-        const iframe = document.querySelector("#viewer iframe");
-        const iframeRect = iframe ? iframe.getBoundingClientRect() : { top: 0, left: 0 };
+  rendition.on("selected", (cfiRange, contents) => {
+    currentSelectionCfi = cfiRange;
+    const selection = contents.window.getSelection();
+    if (selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0);
+      const rect = range.getBoundingClientRect();
+      const iframe = document.querySelector("#viewer iframe");
+      const iframeRect = iframe ? iframe.getBoundingClientRect() : { top: 0, left: 0 };
 
-        const top = rect.top + iframeRect.top - 48;
-        const left = rect.left + iframeRect.left + (rect.width / 2) - 80;
+      const top = rect.top + iframeRect.top - 48;
+      const left = rect.left + iframeRect.left + (rect.width / 2) - 80;
 
-        highlightToolbar.style.top = `${Math.max(10, top)}px`;
-        highlightToolbar.style.left = `${Math.max(10, left)}px`;
-        highlightToolbar.classList.remove("hidden");
-      }
-    });
+      highlightToolbar.style.top = `${Math.max(10, top)}px`;
+      highlightToolbar.style.left = `${Math.max(10, left)}px`;
+      highlightToolbar.classList.remove("hidden");
+    }
+  });
 
-    document.addEventListener("mousedown", (e) => {
-      if (!highlightToolbar.contains(e.target) && !e.target.closest("#viewer")) {
-        highlightToolbar.classList.add("hidden");
-      }
-    });
+  document.addEventListener("mousedown", (e) => {
+    if (!highlightToolbar.contains(e.target) && !e.target.closest("#viewer")) {
+      highlightToolbar.classList.add("hidden");
+    }
+  });
 
-    // Render the first page
-    rendition.display().then(() => {
-      readerOverlay.classList.add("hidden");
-      applyTheme(activeTheme);
-    }).catch(err => {
-      readerContainer.classList.add("hidden");
-      uploadContainer.classList.remove("hidden");
-      showError("Could not render book: " + err.message);
-    });
-
+  // Render first page — overlay hides when this resolves
+  rendition.display().then(() => {
+    readerOverlay.classList.add("hidden");
+    applyTheme(activeTheme);
   }).catch(err => {
-    showError("Could not parse EPUB: " + err.message);
+    readerContainer.classList.add("hidden");
+    uploadContainer.classList.remove("hidden");
+    showError("Could not render book: " + err.message);
   });
 }
 
