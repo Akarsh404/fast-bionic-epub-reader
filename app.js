@@ -80,7 +80,10 @@ dropZone.addEventListener("drop", (e) => {
 dropZone.addEventListener("click", () => fileInput.click());
 
 fileInput.addEventListener("change", (e) => {
-  if (e.target.files.length > 0) handleFile(e.target.files[0]);
+  if (e.target.files.length > 0) {
+    handleFile(e.target.files[0]);
+    e.target.value = ""; // clear selection so same file can be uploaded again
+  }
 });
 
 function showError(msg) {
@@ -136,7 +139,7 @@ function loadBook(bookData) {
     height: "100%",
     flow: "paginated",
     spread: spreadEnabled ? "auto" : "none",
-    minSpreadWidth: 950
+    minSpreadWidth: 800 // lowered from 950px to ensure it works on smaller screens
   });
 
   // Register themes with epub.js
@@ -244,6 +247,11 @@ function loadBook(bookData) {
     readerOverlay.classList.add("hidden");
     applyTheme(activeTheme);
     updateFontSetting();
+    // Explicitly force spread if enabled to catch edge cases where width was 0 at renderTo time
+    if (spreadEnabled) {
+      rendition.spread("auto");
+      rendition.resize();
+    }
   }).catch(err => {
     readerContainer.classList.add("hidden");
     uploadContainer.classList.remove("hidden");
